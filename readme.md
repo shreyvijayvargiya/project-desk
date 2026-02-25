@@ -39,12 +39,12 @@ Add the following (update the path to match where you cloned this repo):
 
 ```json
 {
-  "mcpServers": {
-    "project-desk": {
-      "command": "node",
-      "args": ["/absolute/path/to/project-desk/mcp-server/index.js"]
-    }
-  }
+	"mcpServers": {
+		"project-desk": {
+			"command": "node",
+			"args": ["/absolute/path/to/project-desk/mcp-server/index.js"]
+		}
+	}
 }
 ```
 
@@ -66,16 +66,16 @@ Make sure the Next.js dev server is running (`npm run dev`), then ask Claude thi
 
 ## Available MCP tools
 
-| Tool | Description |
-|------|-------------|
-| `list_projects` | List all projects with task counts |
-| `create_project` | Create a project (name, url, description) |
-| `list_tasks` | List tasks for a project, optionally filter by column |
-| `add_task` | Add a task with title, description, priority, and column |
-| `move_task` | Move a task between backlog / todo / inprogress / done |
-| `update_task` | Edit a task's title, description, or priority |
-| `delete_task` | Delete a task |
-| `delete_project` | Delete a project and all its tasks |
+| Tool             | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| `list_projects`  | List all projects with task counts                       |
+| `create_project` | Create a project (name, url, description)                |
+| `list_tasks`     | List tasks for a project, optionally filter by column    |
+| `add_task`       | Add a task with title, description, priority, and column |
+| `move_task`      | Move a task between backlog / todo / inprogress / done   |
+| `update_task`    | Edit a task's title, description, or priority            |
+| `delete_task`    | Delete a task                                            |
+| `delete_project` | Delete a project and all its tasks                       |
 
 ---
 
