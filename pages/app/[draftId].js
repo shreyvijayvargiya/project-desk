@@ -1,0 +1,2260 @@
+import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/router";
+import { useSelector } from "react-redux";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import LoginModal from "../../lib/ui/LoginModal";
+import InfographicsModal from "../../lib/ui/InfographicsModal";
+import AIChatSidebar from "../../lib/ui/AIChatSidebar";
+import { db } from "../../lib/config/firebase";
+import {
+	collection,
+	getDocs,
+	deleteDoc,
+	doc,
+	getDoc,
+	query,
+	orderBy,
+	where,
+	updateDoc,
+} from "firebase/firestore";
+
+/* ─── Fonts ─── */
+const FontLink = () => (
+	<style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { font-family: 'Outfit', sans-serif; background: #F7F5F0; -webkit-font-smoothing: antialiased; }
+    textarea, input, button { font-family: 'Outfit', sans-serif; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #E8E4DC; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #C17B2F; }
+    [contenteditable]:focus { outline: none; }
+    [contenteditable]:empty:before { content: attr(data-placeholder); color: #B0AAA3; pointer-events: none; }
+  `}</style>
+);
+
+/* ─── Tokens ─── */
+const T = {
+	base: "#F7F5F0",
+	surface: "#FFFFFF",
+	accent: "#1A1A1A",
+	warm: "#C17B2F",
+	muted: "#7A7570",
+	border: "#E8E4DC",
+	sidebar: "#FDFCF9",
+};
+
+const FREE_LIMIT = 3;
+
+const getDateFromFirestore = (val) => {
+	if (!val) return null;
+	if (val.toDate) return val.toDate();
+	if (val.seconds) return new Date(val.seconds * 1000);
+	return new Date(val);
+};
+
+const isThisMonth = (val) => {
+	const d = getDateFromFirestore(val);
+	if (!d) return false;
+	const now = new Date();
+	return (
+		d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+	);
+};
+
+/* ─── Tiny icon components (inline SVG) ─── */
+const Icon = ({
+	d,
+	size = 16,
+	stroke = T.muted,
+	fill = "none",
+	strokeWidth = 1.75,
+}) => (
+	<svg
+		width={size}
+		height={size}
+		viewBox="0 0 24 24"
+		fill={fill}
+		stroke={stroke}
+		strokeWidth={strokeWidth}
+		strokeLinecap="round"
+		strokeLinejoin="round"
+	>
+		<path d={d} />
+	</svg>
+);
+
+const Icons = {
+	plus: "M12 5v14M5 12h14",
+	search: "M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z",
+	trash: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
+	copy: "M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-4-4H8z M14 2v6h6 M8 12h8 M8 16h5",
+	save: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8",
+	zap: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
+	chevronL: "M15 18l-6-6 6-6",
+	chevronR: "M9 18l6-6-6-6",
+	logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9",
+	refresh:
+		"M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0 1 14.85-3.36L23 10 M1 14l4.64 4.36A9 9 0 0 0 20.49 15",
+	fileText:
+		"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8",
+	eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 12m-3 0a3 3 0 1 0 6 0 3 3 0 0 0-6 0",
+	bold: "M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z",
+	italic: "M19 4h-9M14 20H5M15 4L9 20",
+	list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+	link2:
+		"M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3 M8 12h8",
+	settings:
+		"M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
+};
+
+/* ─── Extract a single CSS property value from a CSS string ─── */
+const parseCSSProp = (cssStr = "", prop) => {
+	const m = cssStr.match(new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`));
+	return m ? m[1].trim() : "";
+};
+
+/* ─── 12 predefined themes — each is a map of CSS strings ─── */
+const THEMES = {
+	ink: {
+		name: "Ink", label: "Warm editorial · Serif",
+		palette: ["#F7F5F0", "#1A1A1A", "#C17B2F", "#7A7570"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700&display=swap",
+		bodyFont: "'Outfit', sans-serif", bg: "#F7F5F0", text: "#3A3530",
+		container: "max-width:720px;margin:0 auto;padding:48px 56px;background:#F7F5F0;font-family:'Outfit',sans-serif;",
+		h1: "font-family:'Instrument Serif',serif;font-size:34px;color:#1A1A1A;line-height:1.2;margin:0 0 16px;font-weight:400;",
+		h2: "font-family:'Instrument Serif',serif;font-size:24px;color:#1A1A1A;line-height:1.3;margin:32px 0 12px;font-weight:400;",
+		h3: "font-family:'Instrument Serif',serif;font-size:19px;color:#3A3530;margin:22px 0 8px;font-weight:400;",
+		p: "font-size:16px;line-height:1.85;color:#3A3530;margin:0 0 14px;",
+		blockquote: "border-left:3px solid #C17B2F;padding:4px 0 4px 20px;color:#7A7570;font-style:italic;margin:20px 0;",
+		code: "background:#EDE9E2;border-radius:4px;padding:2px 6px;font-family:monospace;font-size:13px;",
+		strong: "color:#1A1A1A;font-weight:700;", a: "color:#C17B2F;",
+		li: "font-size:16px;line-height:1.8;color:#3A3530;margin:4px 0;",
+		hr: "border:none;border-top:1px solid #E8E4DC;margin:32px 0;",
+	},
+	midnight: {
+		name: "Midnight", label: "Dark minimal · Sans",
+		palette: ["#0D0D0D", "#E8E8E8", "#7C7CFF", "#444444"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+		bodyFont: "'Inter', sans-serif", bg: "#0D0D0D", text: "#A8A8A8",
+		container: "max-width:720px;margin:0 auto;padding:48px 56px;background:#0D0D0D;font-family:'Inter',sans-serif;",
+		h1: "font-family:'Inter',sans-serif;font-size:30px;color:#FFFFFF;line-height:1.2;margin:0 0 16px;font-weight:600;",
+		h2: "font-family:'Inter',sans-serif;font-size:20px;color:#D4D4D4;line-height:1.3;margin:32px 0 12px;font-weight:500;border-bottom:1px solid #222222;padding-bottom:8px;",
+		h3: "font-family:'Inter',sans-serif;font-size:14px;color:#888888;margin:22px 0 8px;font-weight:500;text-transform:uppercase;letter-spacing:0.06em;",
+		p: "font-size:15px;line-height:1.9;color:#A8A8A8;margin:0 0 14px;",
+		blockquote: "border-left:3px solid #7C7CFF;padding:4px 0 4px 20px;color:#666666;font-style:italic;margin:20px 0;",
+		code: "background:#1E1E1E;color:#7FDBCA;border-radius:4px;padding:2px 8px;font-family:'Courier New',monospace;font-size:13px;",
+		strong: "color:#FFFFFF;font-weight:600;", a: "color:#7C7CFF;",
+		li: "font-size:15px;line-height:1.8;color:#A8A8A8;margin:4px 0;",
+		hr: "border:none;border-top:1px solid #222222;margin:32px 0;",
+	},
+	paper: {
+		name: "Paper", label: "Classic editorial · Lora",
+		palette: ["#FFFEF9", "#1A1A2E", "#2A5298", "#888888"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Source+Sans+3:wght@300;400;600&display=swap",
+		bodyFont: "'Source Sans 3', sans-serif", bg: "#FFFEF9", text: "#3C3C3C",
+		container: "max-width:680px;margin:0 auto;padding:52px 48px;background:#FFFEF9;font-family:'Source Sans 3',sans-serif;",
+		h1: "font-family:'Lora',serif;font-size:36px;color:#1A1A2E;line-height:1.15;margin:0 0 20px;font-weight:600;",
+		h2: "font-family:'Lora',serif;font-size:24px;color:#1A1A2E;line-height:1.3;margin:36px 0 14px;font-weight:400;",
+		h3: "font-family:'Lora',serif;font-size:19px;color:#1A1A2E;margin:24px 0 10px;font-weight:400;",
+		p: "font-size:17px;line-height:1.8;color:#3C3C3C;margin:0 0 16px;",
+		blockquote: "border-left:4px solid #2A5298;padding:8px 0 8px 24px;color:#666666;font-style:italic;margin:24px 0;font-family:'Lora',serif;font-size:18px;",
+		code: "background:#F0F0F0;border-radius:3px;padding:2px 6px;font-family:monospace;font-size:13px;",
+		strong: "color:#1A1A2E;font-weight:600;", a: "color:#2A5298;",
+		li: "font-size:17px;line-height:1.8;color:#3C3C3C;margin:5px 0;",
+		hr: "border:none;border-top:2px solid #E0DDD5;margin:36px 0;",
+	},
+	forest: {
+		name: "Forest", label: "Earthy & natural · Merriweather",
+		palette: ["#F0F4F0", "#1B2E1B", "#2D6A4F", "#6B8F6B"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap",
+		bodyFont: "'DM Sans', sans-serif", bg: "#F0F4F0", text: "#2C3E2C",
+		container: "max-width:720px;margin:0 auto;padding:48px 52px;background:#F0F4F0;font-family:'DM Sans',sans-serif;",
+		h1: "font-family:'Merriweather',serif;font-size:32px;color:#1B2E1B;line-height:1.2;margin:0 0 16px;font-weight:700;",
+		h2: "font-family:'Merriweather',serif;font-size:21px;color:#2D6A4F;line-height:1.35;margin:32px 0 12px;font-weight:700;",
+		h3: "font-family:'Merriweather',serif;font-size:17px;color:#1B2E1B;margin:22px 0 8px;font-weight:400;",
+		p: "font-size:16px;line-height:1.85;color:#2C3E2C;margin:0 0 14px;",
+		blockquote: "border-left:4px solid #2D6A4F;background:#E8F0E8;padding:12px 20px;color:#4A6A4A;font-style:italic;margin:24px 0;border-radius:0 8px 8px 0;",
+		code: "background:#D8E8D8;border-radius:4px;padding:2px 6px;font-family:monospace;font-size:13px;color:#1B2E1B;",
+		strong: "color:#1B2E1B;font-weight:700;", a: "color:#2D6A4F;",
+		li: "font-size:16px;line-height:1.8;color:#2C3E2C;margin:5px 0;",
+		hr: "border:none;border-top:2px solid #C8D8C8;margin:32px 0;",
+	},
+	rose: {
+		name: "Rose", label: "Soft feminine · Cormorant",
+		palette: ["#FDF0F3", "#3D1A24", "#D4617A", "#B08090"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=Nunito:wght@300;400;500;600&display=swap",
+		bodyFont: "'Nunito', sans-serif", bg: "#FDF0F3", text: "#4A2530",
+		container: "max-width:700px;margin:0 auto;padding:48px 52px;background:#FDF0F3;font-family:'Nunito',sans-serif;",
+		h1: "font-family:'Cormorant Garamond',serif;font-size:40px;color:#3D1A24;line-height:1.15;margin:0 0 18px;font-weight:600;font-style:italic;",
+		h2: "font-family:'Cormorant Garamond',serif;font-size:26px;color:#D4617A;line-height:1.3;margin:32px 0 12px;font-weight:600;",
+		h3: "font-family:'Cormorant Garamond',serif;font-size:20px;color:#3D1A24;margin:22px 0 8px;font-weight:400;",
+		p: "font-size:16px;line-height:1.9;color:#4A2530;margin:0 0 14px;",
+		blockquote: "border-left:3px solid #D4617A;padding:4px 0 4px 20px;color:#B08090;font-style:italic;margin:20px 0;font-family:'Cormorant Garamond',serif;font-size:18px;",
+		code: "background:#F5E0E5;border-radius:4px;padding:2px 6px;font-family:monospace;font-size:13px;",
+		strong: "color:#3D1A24;font-weight:700;", a: "color:#D4617A;",
+		li: "font-size:16px;line-height:1.8;color:#4A2530;margin:4px 0;",
+		hr: "border:none;border-top:1px solid #F0C8D0;margin:32px 0;",
+	},
+	slate: {
+		name: "Slate", label: "Corporate clean · IBM Plex",
+		palette: ["#F8F9FA", "#1A1F2E", "#3B82F6", "#6B7280"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap",
+		bodyFont: "'IBM Plex Sans', sans-serif", bg: "#F8F9FA", text: "#374151",
+		container: "max-width:740px;margin:0 auto;padding:48px 56px;background:#F8F9FA;font-family:'IBM Plex Sans',sans-serif;",
+		h1: "font-family:'IBM Plex Serif',serif;font-size:32px;color:#1A1F2E;line-height:1.2;margin:0 0 16px;font-weight:600;",
+		h2: "font-family:'IBM Plex Serif',serif;font-size:21px;color:#1A1F2E;line-height:1.35;margin:32px 0 12px;font-weight:600;border-bottom:2px solid #E5E7EB;padding-bottom:8px;",
+		h3: "font-family:'IBM Plex Sans',sans-serif;font-size:12px;color:#1A1F2E;margin:22px 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;",
+		p: "font-size:16px;line-height:1.8;color:#374151;margin:0 0 14px;",
+		blockquote: "border-left:4px solid #3B82F6;background:#EFF6FF;padding:12px 20px;color:#1D4ED8;margin:24px 0;font-style:italic;",
+		code: "background:#F3F4F6;border:1px solid #E5E7EB;border-radius:4px;padding:2px 6px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#1A1F2E;",
+		strong: "color:#1A1F2E;font-weight:600;", a: "color:#3B82F6;",
+		li: "font-size:16px;line-height:1.8;color:#374151;margin:4px 0;",
+		hr: "border:none;border-top:1px solid #E5E7EB;margin:32px 0;",
+	},
+	obsidian: {
+		name: "Obsidian", label: "Terminal · JetBrains Mono",
+		palette: ["#0F0F0F", "#00FF88", "#CCCCCC", "#444444"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap",
+		bodyFont: "'JetBrains Mono', monospace", bg: "#0F0F0F", text: "#CCCCCC",
+		container: "max-width:740px;margin:0 auto;padding:48px 52px;background:#0F0F0F;font-family:'JetBrains Mono',monospace;",
+		h1: "font-family:'JetBrains Mono',monospace;font-size:24px;color:#00FF88;line-height:1.2;margin:0 0 16px;font-weight:500;",
+		h2: "font-family:'JetBrains Mono',monospace;font-size:18px;color:#00FF88;line-height:1.3;margin:32px 0 12px;font-weight:400;",
+		h3: "font-family:'JetBrains Mono',monospace;font-size:14px;color:#AAAAAA;margin:22px 0 8px;font-weight:400;",
+		p: "font-size:14px;line-height:1.9;color:#CCCCCC;margin:0 0 14px;",
+		blockquote: "border-left:3px solid #00FF88;padding:4px 0 4px 16px;color:#888888;font-style:italic;margin:20px 0;",
+		code: "background:#1A1A1A;border:1px solid #333333;color:#00FF88;border-radius:3px;padding:2px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;",
+		strong: "color:#FFFFFF;font-weight:500;", a: "color:#00FF88;",
+		li: "font-size:14px;line-height:1.8;color:#CCCCCC;margin:4px 0;",
+		hr: "border:none;border-top:1px solid #222222;margin:32px 0;",
+	},
+	cream: {
+		name: "Cream", label: "Newsletter · Georgia",
+		palette: ["#FFF8EE", "#1A1A1A", "#EA580C", "#888888"],
+		fontUrl: "",
+		bodyFont: "Georgia, 'Times New Roman', serif", bg: "#FFF8EE", text: "#3A3A3A",
+		container: "max-width:620px;margin:0 auto;padding:52px 48px;background:#FFF8EE;font-family:Georgia,'Times New Roman',serif;",
+		h1: "font-family:Georgia,'Times New Roman',serif;font-size:34px;color:#1A1A1A;line-height:1.2;margin:0 0 18px;font-weight:normal;",
+		h2: "font-family:Georgia,'Times New Roman',serif;font-size:22px;color:#1A1A1A;line-height:1.3;margin:32px 0 12px;font-weight:normal;",
+		h3: "font-family:Georgia,'Times New Roman',serif;font-size:18px;color:#1A1A1A;margin:22px 0 8px;",
+		p: "font-size:17px;line-height:1.8;color:#3A3A3A;margin:0 0 16px;",
+		blockquote: "border-left:4px solid #EA580C;padding:8px 0 8px 20px;color:#888888;font-style:italic;margin:24px 0;",
+		code: "background:#F5EDD8;border-radius:3px;padding:2px 6px;font-family:monospace;font-size:13px;",
+		strong: "color:#1A1A1A;", a: "color:#EA580C;",
+		li: "font-size:17px;line-height:1.8;color:#3A3A3A;margin:5px 0;",
+		hr: "border:none;border-top:2px solid #E8D8C0;margin:36px 0;",
+	},
+	nordic: {
+		name: "Nordic", label: "Minimal white · Playfair",
+		palette: ["#FFFFFF", "#1D3461", "#1D3461", "#8899AA"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Figtree:wght@300;400;500;600&display=swap",
+		bodyFont: "'Figtree', sans-serif", bg: "#FFFFFF", text: "#444B58",
+		container: "max-width:720px;margin:0 auto;padding:56px 60px;background:#FFFFFF;font-family:'Figtree',sans-serif;",
+		h1: "font-family:'Playfair Display',serif;font-size:38px;color:#1D3461;line-height:1.15;margin:0 0 18px;font-weight:700;",
+		h2: "font-family:'Playfair Display',serif;font-size:24px;color:#1D3461;line-height:1.3;margin:36px 0 14px;font-weight:400;",
+		h3: "font-family:'Figtree',sans-serif;font-size:12px;color:#8899AA;margin:24px 0 8px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;",
+		p: "font-size:16px;line-height:1.9;color:#444B58;margin:0 0 16px;",
+		blockquote: "border-left:4px solid #1D3461;padding:8px 0 8px 24px;color:#8899AA;font-family:'Playfair Display',serif;font-style:italic;font-size:18px;margin:28px 0;",
+		code: "background:#F4F5F8;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:13px;color:#1D3461;",
+		strong: "color:#1D3461;font-weight:600;", a: "color:#1D3461;border-bottom:1px solid #1D3461;text-decoration:none;",
+		li: "font-size:16px;line-height:1.8;color:#444B58;margin:5px 0;",
+		hr: "border:none;border-top:1px solid #E8ECF0;margin:40px 0;",
+	},
+	dusk: {
+		name: "Dusk", label: "Dark purple · DM Serif",
+		palette: ["#1E1B2E", "#F0EEFF", "#C084FC", "#7C6FA0"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap",
+		bodyFont: "'DM Sans', sans-serif", bg: "#1E1B2E", text: "#C5BEDC",
+		container: "max-width:720px;margin:0 auto;padding:48px 56px;background:#1E1B2E;font-family:'DM Sans',sans-serif;",
+		h1: "font-family:'DM Serif Display',serif;font-size:36px;color:#F0EEFF;line-height:1.2;margin:0 0 16px;font-weight:400;",
+		h2: "font-family:'DM Serif Display',serif;font-size:24px;color:#C084FC;line-height:1.3;margin:32px 0 12px;font-weight:400;",
+		h3: "font-family:'DM Sans',sans-serif;font-size:14px;color:#9B8DC0;margin:22px 0 8px;font-weight:500;",
+		p: "font-size:16px;line-height:1.9;color:#C5BEDC;margin:0 0 14px;",
+		blockquote: "border-left:3px solid #C084FC;padding:4px 0 4px 20px;color:#7C6FA0;font-style:italic;margin:20px 0;",
+		code: "background:#2A2540;color:#C084FC;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:13px;",
+		strong: "color:#F0EEFF;font-weight:500;", a: "color:#C084FC;",
+		li: "font-size:16px;line-height:1.8;color:#C5BEDC;margin:4px 0;",
+		hr: "border:none;border-top:1px solid #2E2A42;margin:32px 0;",
+	},
+	sand: {
+		name: "Sand", label: "Notion-like · Jakarta Sans",
+		palette: ["#FAF9F7", "#37352F", "#0078D4", "#9B9B9B"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap",
+		bodyFont: "'Plus Jakarta Sans', sans-serif", bg: "#FAF9F7", text: "#37352F",
+		container: "max-width:740px;margin:0 auto;padding:44px 48px;background:#FAF9F7;font-family:'Plus Jakarta Sans',sans-serif;",
+		h1: "font-family:'Plus Jakarta Sans',sans-serif;font-size:30px;color:#37352F;line-height:1.2;margin:0 0 16px;font-weight:700;",
+		h2: "font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;color:#37352F;line-height:1.35;margin:28px 0 10px;font-weight:600;",
+		h3: "font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;color:#37352F;margin:20px 0 8px;font-weight:600;",
+		p: "font-size:16px;line-height:1.75;color:#37352F;margin:0 0 8px;",
+		blockquote: "border-left:3px solid #BDBDBD;padding:4px 0 4px 14px;color:#9B9B9B;margin:16px 0;",
+		code: "background:#F1F0EE;border-radius:4px;padding:2px 6px;font-family:monospace;font-size:13px;color:#EB5757;",
+		strong: "color:#37352F;font-weight:700;", a: "color:#0078D4;text-decoration:underline;",
+		li: "font-size:16px;line-height:1.75;color:#37352F;margin:2px 0;",
+		hr: "background:#E8E7E4;border:none;height:1px;margin:28px 0;",
+	},
+	bold: {
+		name: "Bold", label: "Magazine editorial · Bebas",
+		palette: ["#F5F5F5", "#111111", "#DC2626", "#666666"],
+		fontUrl: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto:ital,wght@0,400;0,500;1,400&display=swap",
+		bodyFont: "'Roboto', sans-serif", bg: "#F5F5F5", text: "#333333",
+		container: "max-width:740px;margin:0 auto;padding:48px 56px;background:#F5F5F5;font-family:'Roboto',sans-serif;",
+		h1: "font-family:'Bebas Neue',sans-serif;font-size:56px;color:#111111;line-height:1.0;margin:0 0 20px;letter-spacing:0.03em;",
+		h2: "font-family:'Bebas Neue',sans-serif;font-size:30px;color:#DC2626;line-height:1.1;margin:32px 0 14px;letter-spacing:0.05em;",
+		h3: "font-family:'Roboto',sans-serif;font-size:12px;color:#111111;margin:22px 0 8px;font-weight:500;text-transform:uppercase;letter-spacing:0.1em;",
+		p: "font-size:16px;line-height:1.8;color:#333333;margin:0 0 14px;",
+		blockquote: "border-left:6px solid #DC2626;padding:12px 24px;background:#FFFFFF;color:#666666;font-size:20px;font-style:italic;margin:24px 0;",
+		code: "background:#EBEBEB;border-radius:3px;padding:2px 6px;font-family:monospace;font-size:13px;",
+		strong: "color:#111111;font-weight:700;", a: "color:#DC2626;",
+		li: "font-size:16px;line-height:1.8;color:#333333;margin:4px 0;",
+		hr: "border:none;border-top:3px solid #111111;margin:32px 0;",
+	},
+};
+
+/* ─── Inline markdown → HTML (links, images, bold, italic, code) ─── */
+const parseInlineMarkdown = (text = "") =>
+	text
+		/* images before links so ![...](...) doesn't match as a link */
+		.replace(
+			/!\[([^\]]*)\]\(([^)\s>]+)\)/g,
+			(_, alt, src) =>
+				`<img src="${src}" alt="${alt}" style="max-width:100%;height:auto;border-radius:6px;margin:10px 0;display:block;"/>`,
+		)
+		/* links */
+		.replace(
+			/\[([^\]]+)\]\(([^)\s>]+)\)/g,
+			(_, linkText, href) =>
+				`<a href="${href}" target="_blank" rel="noopener">${linkText}</a>`,
+		)
+		/* bold **…** and __…__ */
+		.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+		.replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
+		/* italic *…* (single asterisk only — skip _…_ to avoid false-positives in URLs/CSS) */
+		.replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+		/* inline code */
+		.replace(/`([^`\n]+)`/g, "<code>$1</code>")
+		/* strikethrough ~~…~~ */
+		.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+
+/* ─── Build a complete standalone HTML document with theme applied ─── */
+function buildThemedHTML(currentHTML = "", theme, title = "") {
+	if (!currentHTML.trim()) return "";
+
+	/* Get inner content of a node and run inline markdown on it */
+	const getInner = (node) => parseInlineMarkdown(node.innerHTML || node.textContent || "");
+
+	let body = "";
+	try {
+		const tmp = document.createElement("div");
+		tmp.innerHTML = currentHTML;
+
+		const processNode = (node) => {
+			const tag = node.nodeName?.toLowerCase();
+			if (!tag || tag === "#text") {
+				const t = (node.textContent || "").trim();
+				return t ? parseInlineMarkdown(t) : "";
+			}
+			const inner = getInner(node);
+			const text = (node.textContent || "").trim();
+
+			if (tag === "h1") return `<h1 style="${theme.h1}">${inner}</h1>\n`;
+			if (tag === "h2") return `<h2 style="${theme.h2}">${inner}</h2>\n`;
+			if (tag === "h3" || tag === "h4" || tag === "h5" || tag === "h6")
+				return `<h3 style="${theme.h3}">${inner}</h3>\n`;
+			if (tag === "blockquote")
+				return `<blockquote style="${theme.blockquote}">${inner}</blockquote>\n`;
+			if (tag === "ul" || tag === "ol") {
+				const items = Array.from(node.children)
+					.filter((n) => n.nodeName?.toLowerCase() === "li")
+					.map((li) => `<li style="${theme.li}">${parseInlineMarkdown(li.innerHTML || "")}</li>`)
+					.join("\n");
+				return `<${tag} style="padding-left:24px;margin:0 0 14px;">${items}</${tag}>\n`;
+			}
+			if (tag === "pre")
+				return `<pre style="background:rgba(0,0,0,0.06);padding:16px 20px;border-radius:6px;overflow:auto;margin:0 0 16px;font-family:monospace;font-size:13px;line-height:1.6;">${node.textContent || ""}</pre>\n`;
+			if (tag === "hr") return `<hr style="${theme.hr}"/>\n`;
+			if (tag === "br" || !text) return `<br/>\n`;
+			if (tag === "img")
+				return `<img src="${node.getAttribute("src") || ""}" alt="${node.getAttribute("alt") || ""}" style="max-width:100%;height:auto;border-radius:6px;margin:12px 0;display:block;"/>\n`;
+			/* p, div, section, article → paragraph */
+			return `<p style="${theme.p}">${inner}</p>\n`;
+		};
+
+		tmp.childNodes.forEach((node) => {
+			body += processNode(node);
+		});
+	} catch {
+		body = `<p style="${theme.p}">${parseInlineMarkdown(currentHTML.replace(/<[^>]+>/g, ""))}</p>`;
+	}
+
+	const fontLink = theme.fontUrl
+		? `<link href="${theme.fontUrl}" rel="stylesheet"/>`
+		: "";
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>${title || "Draft"}</title>
+  ${fontLink}
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:${theme.bg};color:${theme.text};font-family:${theme.bodyFont};-webkit-font-smoothing:antialiased;}
+    a{${theme.a}}
+    strong,b{${theme.strong}}
+    em,i{font-style:italic;}
+    code{${theme.code}}
+    img{max-width:100%;height:auto;border-radius:6px;}
+    ul,ol{padding-left:24px;margin:0 0 14px;}
+    li{${theme.li}}
+    hr{${theme.hr}}
+    blockquote{${theme.blockquote}}
+    pre{background:rgba(0,0,0,0.06);padding:16px 20px;border-radius:6px;overflow:auto;margin:0 0 16px;font-family:monospace;font-size:13px;line-height:1.6;}
+  </style>
+</head>
+<body>
+  <div style="${theme.container}">
+    ${title ? `<h1 style="${theme.h1}">${title}</h1>` : ""}
+    ${body}
+  </div>
+</body>
+</html>`;
+}
+
+/* ─── Draft card in sidebar ─── */
+function DraftCard({ draft, active, onClick, onDelete }) {
+	const [hovering, setHovering] = useState(false);
+	return (
+		<motion.div
+			layout
+			initial={{ opacity: 0, x: -12 }}
+			animate={{ opacity: 1, x: 0 }}
+			exit={{ opacity: 0, x: -12, scale: 0.95 }}
+			whileHover={{ x: 2 }}
+			transition={{ duration: 0.22 }}
+			onHoverStart={() => setHovering(true)}
+			onHoverEnd={() => setHovering(false)}
+			onClick={onClick}
+			style={{
+				background: active ? T.surface : "transparent",
+				border: `1px solid ${active ? T.border : "transparent"}`,
+				borderRadius: 10,
+				padding: "12px 14px",
+				cursor: "pointer",
+				boxShadow: active ? "0 1px 8px rgba(0,0,0,0.07)" : "none",
+				position: "relative",
+				marginBottom: 4,
+				transition: "background 0.15s, border-color 0.15s",
+			}}
+		>
+			{active && (
+				<motion.div
+					layoutId="active-pill"
+					style={{
+						position: "absolute",
+						left: 0,
+						top: "50%",
+						transform: "translateY(-50%)",
+						width: 3,
+						height: 32,
+						background: T.warm,
+						borderRadius: "0 3px 3px 0",
+					}}
+				/>
+			)}
+			<div
+				style={{
+					display: "flex",
+					alignItems: "flex-start",
+					justifyContent: "space-between",
+					gap: 8,
+				}}
+			>
+				<div style={{ flex: 1, minWidth: 0 }}>
+					<p
+						style={{
+							fontSize: 13,
+							fontWeight: 600,
+							color: T.accent,
+							lineHeight: 1.4,
+							marginBottom: 4,
+							overflow: "hidden",
+							display: "-webkit-box",
+							WebkitLineClamp: 2,
+							WebkitBoxOrient: "vertical",
+						}}
+					>
+						{draft.title}
+					</p>
+					<p
+						style={{
+							fontSize: 11.5,
+							color: T.muted,
+							lineHeight: 1.5,
+							overflow: "hidden",
+							display: "-webkit-box",
+							WebkitLineClamp: 2,
+							WebkitBoxOrient: "vertical",
+							marginBottom: 6,
+						}}
+					>
+						{draft.preview}
+					</p>
+					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+						<span
+							style={{
+								fontSize: 10.5,
+								fontWeight: 600,
+								background: "#F0ECE5",
+								color: T.muted,
+								padding: "2px 7px",
+								borderRadius: 100,
+							}}
+						>
+							{draft.tag}
+						</span>
+						<span style={{ fontSize: 10.5, color: T.muted }}>
+							{draft.words}w
+						</span>
+						<span style={{ fontSize: 10.5, color: T.muted }}>·</span>
+						<span style={{ fontSize: 10.5, color: T.muted }}>{draft.date}</span>
+					</div>
+				</div>
+				<AnimatePresence>
+					{hovering && (
+						<motion.button
+							initial={{ opacity: 0, scale: 0.8 }}
+							animate={{ opacity: 1, scale: 1 }}
+							exit={{ opacity: 0, scale: 0.8 }}
+							onClick={(e) => {
+								e.stopPropagation();
+								onDelete(draft.id);
+							}}
+							style={{
+								background: "none",
+								border: "none",
+								cursor: "pointer",
+								padding: 4,
+								borderRadius: 6,
+								flexShrink: 0,
+								color: "#EF4444",
+								transition: "background 0.15s",
+							}}
+							whileHover={{ background: "#FEE2E2" }}
+						>
+							<Icon d={Icons.trash} size={14} stroke="#EF4444" />
+						</motion.button>
+					)}
+				</AnimatePresence>
+			</div>
+		</motion.div>
+	);
+}
+
+/* ─── Editor toolbar button ─── */
+function TBtn({ icon, label, onClick, active = false }) {
+	return (
+		<motion.button
+			whileHover={{ background: "#F0ECE5" }}
+			whileTap={{ scale: 0.93 }}
+			onClick={onClick}
+			title={label}
+			style={{
+				background: active ? "#E8E4DC" : "transparent",
+				border: "none",
+				borderRadius: 7,
+				padding: "6px 8px",
+				cursor: "pointer",
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "center",
+				transition: "background 0.15s",
+			}}
+		>
+			<Icon d={icon} size={15} stroke={active ? T.accent : T.muted} />
+		</motion.button>
+	);
+}
+
+/* ═══════════════════════════════════════════
+   RICH EDITOR BLOCKS
+═══════════════════════════════════════════ */
+
+const CALLOUT_CONFIGS = {
+	info:    { emoji: "ℹ️",  border: "#3B82F6", bg: "#EFF6FF", textColor: "#1E40AF", label: "Info" },
+	warning: { emoji: "⚠️", border: "#F59E0B", bg: "#FFFBEB", textColor: "#92400E", label: "Warning" },
+	success: { emoji: "✅", border: "#10B981", bg: "#ECFDF5", textColor: "#065F46", label: "Success" },
+	danger:  { emoji: "🚨", border: "#EF4444", bg: "#FEF2F2", textColor: "#991B1B", label: "Danger" },
+};
+
+const LANG_OPTIONS = ["javascript","typescript","python","css","html","bash","json","sql","text"];
+
+function makeCalloutHtml(type, text = "") {
+	const c = CALLOUT_CONFIGS[type] || CALLOUT_CONFIGS.info;
+	return `<div data-block="callout-${type}" style="border-left:4px solid ${c.border};background:${c.bg};border-radius:0 8px 8px 0;padding:13px 16px;margin:14px 0;display:flex;gap:12px;align-items:flex-start"><span style="font-size:17px;flex-shrink:0;line-height:1.6;margin-top:2px">${c.emoji}</span><div style="flex:1"><p style="font-weight:700;color:${c.textColor};font-size:10.5px;text-transform:uppercase;letter-spacing:0.1em;margin:0 0 5px;font-family:'Outfit',sans-serif">${c.label}</p><div style="color:${c.textColor};font-size:14px;line-height:1.65;font-family:'Outfit',sans-serif">${text}</div></div></div>`;
+}
+
+function makeCodeBlockHtml(language = "javascript", code = "// Your code here") {
+	const lang = language.toLowerCase().trim() || "text";
+	const opts = LANG_OPTIONS.map(
+		(l) => `<option value="${l}" ${l === lang ? "selected" : ""}>${l.charAt(0).toUpperCase() + l.slice(1)}</option>`,
+	).join("");
+	return `<div data-block="code" style="margin:16px 0;border-radius:10px;overflow:hidden;border:1px solid #E8E4DC"><div contenteditable="false" style="background:#F0ECE5;padding:8px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #E8E4DC;user-select:none"><select data-action="change-lang" style="background:none;border:none;font-size:11px;font-weight:700;color:#5A5550;text-transform:uppercase;letter-spacing:0.06em;cursor:pointer;outline:none;font-family:'Outfit',sans-serif">${opts}</select><button data-action="copy-code" style="background:#FFFFFF;border:1px solid #E8E4DC;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:#7A7570;cursor:pointer;font-family:'Outfit',sans-serif;transition:all 0.15s">Copy</button></div><pre style="background:#1A1A1A;margin:0;padding:18px 20px;overflow-x:auto"><code style="color:#E8D5B0;font-family:'Fira Code','Cascadia Code','Courier New',monospace;font-size:13px;line-height:1.75;white-space:pre;display:block">${code}</code></pre></div>`;
+}
+
+function makeButtonBlockHtml(text = "Click here →", href = "#") {
+	return `<p style="margin:16px 0"><a href="${href}" style="display:inline-block;background:#C17B2F;color:#FFFFFF;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:700;font-family:'Outfit',sans-serif;letter-spacing:0.01em">${text}</a></p>`;
+}
+
+/* ─── Draft Page ─── */
+export default function DraftPage() {
+	const router = useRouter();
+	const { draftId } = router.query;
+	const reduxUser = useSelector((state) => state.user?.user ?? null);
+
+	const queryClient = useQueryClient();
+	const [search, setSearch] = useState("");
+	const [sidebarOpen, setSidebarOpen] = useState(true);
+	const [copied, setCopied] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const [wordCount, setWordCount] = useState(0);
+	const [loginModalOpen, setLoginModalOpen] = useState(false);
+	const [deleteConfirm, setDeleteConfirm] = useState(null);
+	const [themeDrawerOpen, setThemeDrawerOpen] = useState(false);
+	const [copiedTheme, setCopiedTheme] = useState(null);
+	const [previewTheme, setPreviewTheme] = useState("ink");
+	const [infographicsOpen, setInfographicsOpen] = useState(false);
+	const [chatOpen, setChatOpen] = useState(false);
+	const [blockMenuOpen, setBlockMenuOpen] = useState(false);
+	const editorRef = useRef(null);
+
+	/* All drafts for sidebar */
+	const { data: drafts = [] } = useQuery({
+		queryKey: ["drafts", reduxUser?.uid],
+		queryFn: async () => {
+			const q = query(
+				collection(db, "drafts"),
+				where("userId", "==", reduxUser.uid),
+				orderBy("createdAt", "desc"),
+			);
+			const snap = await getDocs(q);
+			return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+		},
+		enabled: !!reduxUser,
+		staleTime: 2 * 60 * 1000,
+	});
+
+	/* Single draft by ID */
+	const { data: draft, isLoading: loadingDraft } = useQuery({
+		queryKey: ["draft", draftId],
+		queryFn: async () => {
+			const snap = await getDoc(doc(db, "drafts", draftId));
+			if (!snap.exists()) {
+				router.replace("/app");
+				return null;
+			}
+			return { id: snap.id, ...snap.data() };
+		},
+		enabled: !!draftId,
+		staleTime: 5 * 60 * 1000,
+		retry: false,
+	});
+
+	/* Dynamic usage for navbar pill */
+	const used = drafts.filter((d) => isThisMonth(d.createdAt)).length;
+	const remaining = Math.max(0, FREE_LIMIT - used);
+
+	/* Format markdown body → editor HTML, handling rich blocks */
+	const formatBody = (body = "") => {
+		if (body.trim().startsWith("<")) return body;
+
+		/* 1. Extract multi-line blocks into tokens so line-splitting is safe */
+		const tokens = [];
+		let text = body;
+
+		// Code fences  ```lang\ncode\n```
+		text = text.replace(/```(\w*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
+			const language = (lang.trim() || "text");
+			const escaped = code.trim()
+				.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+			const tok = `\x01BLK${tokens.length}\x01`;
+			tokens.push(makeCodeBlockHtml(language, escaped));
+			return tok;
+		});
+
+		// Callout blocks  :::type\ntext\n:::
+		text = text.replace(/:::(\w+)\r?\n([\s\S]*?):::/g, (_, type, content) => {
+			const innerHtml = content.trim().replace(/\n/g, "<br>");
+			const tok = `\x01BLK${tokens.length}\x01`;
+			tokens.push(makeCalloutHtml(type, innerHtml));
+			return tok;
+		});
+
+		/* 2. Process line by line */
+		const restore = (s) => s.replace(/\x01BLK(\d+)\x01/g, (_, i) => tokens[+i]);
+
+		return text.split("\n").map((line) => {
+			if (/\x01BLK\d+\x01/.test(line)) return restore(line);
+			if (line.startsWith("### ")) return `<h3 style="font-family:'Instrument Serif',serif;font-size:17px;color:#1A1A1A;margin:16px 0 7px">${line.slice(4)}</h3>`;
+			if (line.startsWith("## "))  return `<h2 style="font-family:'Instrument Serif',serif;font-size:20px;color:#1A1A1A;margin:20px 0 8px;line-height:1.3">${line.slice(3)}</h2>`;
+			if (line.startsWith("# "))   return `<h1 style="font-family:'Instrument Serif',serif;font-size:26px;color:#1A1A1A;margin:24px 0 10px;line-height:1.2">${line.slice(2)}</h1>`;
+			if (line.trim() === "")      return "<br/>";
+			return `<p style="font-size:15px;line-height:1.8;color:#3A3530;margin-bottom:4px">${line}</p>`;
+		}).join("");
+	};
+
+	/* Set editor content when draft loads */
+	useEffect(() => {
+		if (editorRef.current && draft) {
+			editorRef.current.innerHTML = formatBody(draft.body || "");
+			countWords();
+		}
+	}, [draft]);
+
+	const countWords = () => {
+		const text = editorRef.current?.innerText || "";
+		setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
+	};
+
+	const handleCopy = () => {
+		const text = editorRef.current?.innerText || draft?.body || "";
+		navigator.clipboard.writeText(text).catch(() => {});
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
+
+	const handleSave = async () => {
+		if (!draftId) return;
+		try {
+			const html = editorRef.current?.innerHTML || "";
+			await updateDoc(doc(db, "drafts", draftId), { body: html });
+		} catch (e) {
+			console.error("Save failed", e);
+		}
+		setSaved(true);
+		setTimeout(() => setSaved(false), 2000);
+	};
+
+	/* ── Insert a rich block at the cursor ── */
+	const insertBlock = (type) => {
+		editorRef.current?.focus();
+		let html = "";
+		if (type === "code")   html = makeCodeBlockHtml("javascript", "// Your code here");
+		else if (type === "button") html = makeButtonBlockHtml();
+		else html = makeCalloutHtml(type, `${CALLOUT_CONFIGS[type]?.label || "Callout"} — edit this text.`);
+		if (html) {
+			document.execCommand("insertHTML", false, html + "<p><br></p>");
+			countWords();
+		}
+		setBlockMenuOpen(false);
+	};
+
+	/* ── Event delegation on the editor for code-block interactions ── */
+	useEffect(() => {
+		const el = editorRef.current;
+		if (!el) return;
+
+		const handleClick = (e) => {
+			if (e.target.dataset?.action === "copy-code") {
+				e.preventDefault();
+				const block = e.target.closest("[data-block=\"code\"]");
+				const code = block?.querySelector("code");
+				if (code) {
+					navigator.clipboard.writeText(code.innerText).catch(() => {});
+					const btn = e.target;
+					const prev = btn.textContent;
+					btn.textContent = "Copied!";
+					btn.style.color = "#10B981";
+					btn.style.borderColor = "#10B981";
+					setTimeout(() => {
+						btn.textContent = prev;
+						btn.style.color = "";
+						btn.style.borderColor = "";
+					}, 1800);
+				}
+			}
+		};
+
+		const handleChange = (e) => {
+			if (e.target.dataset?.action === "change-lang") {
+				// nothing extra needed — the native <select> already stores its value
+			}
+		};
+
+		el.addEventListener("click", handleClick);
+		el.addEventListener("change", handleChange);
+		return () => {
+			el.removeEventListener("click", handleClick);
+			el.removeEventListener("change", handleChange);
+		};
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
+	/* ── Close block-insert menu when clicking outside ── */
+	useEffect(() => {
+		if (!blockMenuOpen) return;
+		const close = (e) => {
+			if (!e.target.closest("[data-block-menu]")) setBlockMenuOpen(false);
+		};
+		document.addEventListener("mousedown", close);
+		return () => document.removeEventListener("mousedown", close);
+	}, [blockMenuOpen]);
+
+	const handleDelete = (id) => setDeleteConfirm(id);
+
+	const confirmDelete = async () => {
+		try {
+			await deleteDoc(doc(db, "drafts", deleteConfirm));
+			queryClient.setQueryData(["drafts", reduxUser?.uid], (old = []) =>
+				old.filter((d) => d.id !== deleteConfirm),
+			);
+			if (deleteConfirm === draftId) {
+				router.push("/app");
+			}
+		} catch (e) {
+			console.error("Delete failed", e);
+		}
+		setDeleteConfirm(null);
+	};
+
+	const handleCopyThemeHTML = (themeKey) => {
+		const theme = THEMES[themeKey];
+		if (!theme) return;
+		const html = editorRef.current?.innerHTML || draft?.body || "";
+		const title = draft?.title || "";
+		const output = buildThemedHTML(html, theme, title);
+		navigator.clipboard.writeText(output).catch(() => {});
+		setCopiedTheme(themeKey);
+		setTimeout(() => setCopiedTheme(null), 2200);
+	};
+
+	const filtered = drafts.filter(
+		(d) =>
+			d.title?.toLowerCase().includes(search.toLowerCase()) ||
+			d.preview?.toLowerCase().includes(search.toLowerCase()),
+	);
+
+	const sourceUrl = Array.isArray(draft?.urls)
+		? draft.urls[0] || ""
+		: draft?.url || "";
+
+	if (loadingDraft && !draft) {
+		return (
+			<div
+				style={{
+					height: "100vh",
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+					background: T.base,
+					fontFamily: "'Outfit', sans-serif",
+				}}
+			>
+				<FontLink />
+				<motion.div
+					animate={{ opacity: [0.4, 1, 0.4] }}
+					transition={{ duration: 1.5, repeat: Infinity }}
+					style={{ fontSize: 15, color: T.muted }}
+				>
+					Loading draft…
+				</motion.div>
+			</div>
+		);
+	}
+
+	return (
+		<div
+			style={{
+				height: "100vh",
+				display: "flex",
+				flexDirection: "column",
+				background: T.base,
+				fontFamily: "'Outfit', sans-serif",
+				overflow: "hidden",
+			}}
+		>
+			<FontLink />
+
+			{/* ── TOP BAR ── */}
+			<div
+				style={{
+					height: 56,
+					background: T.surface,
+					borderBottom: `1px solid ${T.border}`,
+					display: "flex",
+					alignItems: "center",
+					padding: "0 20px",
+					gap: 12,
+					flexShrink: 0,
+					zIndex: 50,
+				}}
+			>
+				{/* Logo */}
+				<a
+					href="/"
+					style={{
+						fontFamily: "'Instrument Serif',serif",
+						fontSize: 20,
+						color: T.accent,
+						textDecoration: "none",
+						display: "flex",
+						alignItems: "center",
+						gap: 7,
+						flexShrink: 0,
+						marginRight: 8,
+					}}
+				>
+					<motion.span
+						whileHover={{ scale: 1.3 }}
+						style={{
+							width: 8,
+							height: 8,
+							borderRadius: "50%",
+							background: T.warm,
+							display: "inline-block",
+						}}
+					/>
+					inkgest
+				</a>
+
+				{/* Sidebar toggle — only when logged in */}
+				{reduxUser && (
+					<motion.button
+						whileHover={{ background: "#F0ECE5" }}
+						whileTap={{ scale: 0.93 }}
+						onClick={() => setSidebarOpen((s) => !s)}
+						style={{
+							background: "transparent",
+							border: "none",
+							borderRadius: 8,
+							padding: "6px 8px",
+							cursor: "pointer",
+						}}
+					>
+						<Icon d={sidebarOpen ? Icons.chevronL : Icons.chevronR} size={16} />
+					</motion.button>
+				)}
+
+				<div style={{ width: 1, height: 20, background: T.border }} />
+
+				{/* Usage pill */}
+				<div
+					style={{
+						display: "flex",
+						alignItems: "center",
+						gap: 8,
+						marginLeft: 4,
+						background: remaining === 0 ? "#FEF3E2" : T.base,
+						border: `1px solid ${remaining === 0 ? "#F5C97A" : T.border}`,
+						borderRadius: 100,
+						padding: "4px 12px",
+					}}
+				>
+					<div
+						style={{
+							width: 52,
+							height: 3,
+							background: T.border,
+							borderRadius: 100,
+							overflow: "hidden",
+						}}
+					>
+						<motion.div
+							animate={{
+								width: `${((FREE_LIMIT - remaining) / FREE_LIMIT) * 100}%`,
+							}}
+							transition={{ duration: 0.6 }}
+							style={{ height: "100%", background: T.warm, borderRadius: 100 }}
+						/>
+					</div>
+					<span style={{ fontSize: 12, color: T.muted, fontWeight: 600 }}>
+						{remaining}/{FREE_LIMIT} left
+					</span>
+					<motion.button
+						whileHover={{ scale: 1.04 }}
+						whileTap={{ scale: 0.97 }}
+						onClick={() => router.push("/pricing")}
+						style={{
+							background: T.accent,
+							color: "white",
+							border: "none",
+							padding: "3px 10px",
+							borderRadius: 100,
+							fontSize: 11,
+							fontWeight: 700,
+							cursor: "pointer",
+						}}
+					>
+						Upgrade
+					</motion.button>
+				</div>
+
+				<div style={{ flex: 1 }} />
+				{/* New draft button */}
+				<motion.button
+					whileHover={{
+						scale: 1.03,
+						y: -1,
+						boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
+					}}
+					whileTap={{ scale: 0.97 }}
+					onClick={() => router.push("/app")}
+					style={{
+						display: "flex",
+						alignItems: "center",
+						gap: 6,
+						background: T.accent,
+						color: "white",
+						border: "none",
+						padding: "7px 16px",
+						borderRadius: 9,
+						fontSize: 13,
+						fontWeight: 600,
+						cursor: "pointer",
+					}}
+				>
+					<Icon d={Icons.plus} size={14} stroke="white" /> New draft
+				</motion.button>
+
+				{/* User avatar / login */}
+				<motion.button
+					whileHover={{ scale: 1.08 }}
+					whileTap={{ scale: 0.95 }}
+					onClick={() => setLoginModalOpen(true)}
+					style={{
+						background: "none",
+						border: "none",
+						padding: 0,
+						cursor: "pointer",
+						borderRadius: "50%",
+					}}
+				>
+					{reduxUser?.photoURL ? (
+						<img
+							src={reduxUser.photoURL}
+							alt={reduxUser.displayName || "User"}
+							style={{
+								width: 34,
+								height: 34,
+								borderRadius: "50%",
+								objectFit: "cover",
+								border: `2px solid ${T.border}`,
+								display: "block",
+							}}
+						/>
+					) : (
+						<div
+							style={{
+								width: 34,
+								height: 34,
+								borderRadius: "50%",
+								background: T.border,
+								border: `2px solid ${T.border}`,
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+							}}
+						>
+							<Icon d={Icons.settings} size={16} stroke={T.muted} />
+						</div>
+					)}
+				</motion.button>
+				<LoginModal
+					isOpen={loginModalOpen}
+					onClose={() => setLoginModalOpen(false)}
+				/>
+			</div>
+
+			{/* ── MAIN BODY ── */}
+			<div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+				{/* ── LEFT SIDEBAR — only for logged-in users ── */}
+				<AnimatePresence initial={false}>
+					{reduxUser && sidebarOpen && (
+						<motion.aside
+							initial={{ width: 0, opacity: 0 }}
+							animate={{ width: 280, opacity: 1 }}
+							exit={{ width: 0, opacity: 0 }}
+							transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+							style={{
+								background: T.sidebar,
+								borderRight: `1px solid ${T.border}`,
+								display: "flex",
+								flexDirection: "column",
+								overflow: "hidden",
+								flexShrink: 0,
+							}}
+						>
+							<div
+								style={{
+									padding: "16px 14px 12px",
+									borderBottom: `1px solid ${T.border}`,
+									flexShrink: 0,
+								}}
+							>
+								<p
+									style={{
+										fontSize: 11,
+										fontWeight: 700,
+										textTransform: "uppercase",
+										letterSpacing: "0.08em",
+										color: T.muted,
+										marginBottom: 10,
+									}}
+								>
+									My Drafts
+								</p>
+								{/* Search */}
+								<div style={{ position: "relative" }}>
+									<div
+										style={{
+											position: "absolute",
+											left: 10,
+											top: "50%",
+											transform: "translateY(-50%)",
+											pointerEvents: "none",
+										}}
+									>
+										<Icon d={Icons.search} size={13} stroke={T.muted} />
+									</div>
+									<input
+										value={search}
+										onChange={(e) => setSearch(e.target.value)}
+										placeholder="Search drafts…"
+										style={{
+											width: "100%",
+											background: T.surface,
+											border: `1px solid ${T.border}`,
+											borderRadius: 9,
+											padding: "7px 10px 7px 30px",
+											fontSize: 13,
+											color: T.accent,
+											outline: "none",
+											transition: "border-color 0.2s",
+										}}
+										onFocus={(e) => (e.target.style.borderColor = T.warm)}
+										onBlur={(e) => (e.target.style.borderColor = T.border)}
+									/>
+								</div>
+							</div>
+
+							{/* Draft list */}
+							<div style={{ flex: 1, overflowY: "auto", padding: "10px 10px" }}>
+								<AnimatePresence>
+									{filtered.length === 0 ? (
+										<motion.div
+											initial={{ opacity: 0 }}
+											animate={{ opacity: 1 }}
+											style={{
+												textAlign: "center",
+												padding: "40px 16px",
+												color: T.muted,
+											}}
+										>
+											<p style={{ fontSize: 32, marginBottom: 10 }}>📭</p>
+											<p style={{ fontSize: 13 }}>No drafts found</p>
+										</motion.div>
+									) : (
+										filtered.map((d) => (
+											<DraftCard
+												key={d.id}
+												draft={d}
+												active={d.id === draftId}
+												onClick={() => router.push(`/app/${d.id}`)}
+												onDelete={handleDelete}
+											/>
+										))
+									)}
+								</AnimatePresence>
+							</div>
+
+							{/* Sidebar footer */}
+							<div
+								style={{
+									padding: "12px 14px",
+									borderTop: `1px solid ${T.border}`,
+									flexShrink: 0,
+								}}
+							>
+								<motion.div
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 8,
+										cursor: "pointer",
+									}}
+									onClick={() => setLoginModalOpen(true)}
+									whileHover={{ opacity: 0.8 }}
+								>
+									{reduxUser?.photoURL ? (
+										<img
+											src={reduxUser.photoURL}
+											alt={reduxUser.displayName || "User"}
+											style={{
+												width: 28,
+												height: 28,
+												borderRadius: "50%",
+												objectFit: "cover",
+												flexShrink: 0,
+											}}
+										/>
+									) : (
+										<div
+											style={{
+												width: 28,
+												height: 28,
+												borderRadius: "50%",
+												background: T.border,
+												display: "flex",
+												alignItems: "center",
+												justifyContent: "center",
+												flexShrink: 0,
+											}}
+										>
+											<Icon d={Icons.settings} size={13} stroke={T.muted} />
+										</div>
+									)}
+									<div style={{ flex: 1, minWidth: 0 }}>
+										<p
+											style={{
+												fontSize: 12,
+												fontWeight: 600,
+												color: T.accent,
+												lineHeight: 1.3,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+											}}
+										>
+											{reduxUser?.displayName || "Sign in"}
+										</p>
+										<p
+											style={{
+												fontSize: 11,
+												color: T.muted,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+											}}
+										>
+											{reduxUser?.email || "Click to log in"}
+										</p>
+									</div>
+									{reduxUser && (
+										<span
+											style={{
+												fontSize: 10.5,
+												fontWeight: 700,
+												background: "#FEF3E2",
+												color: "#92400E",
+												padding: "2px 8px",
+												borderRadius: 100,
+												flexShrink: 0,
+											}}
+										>
+											FREE
+										</span>
+									)}
+								</motion.div>
+							</div>
+						</motion.aside>
+					)}
+				</AnimatePresence>
+
+				{/* ── RIGHT PANEL — Editor ── */}
+				<div
+					style={{
+						flex: 1,
+						display: "flex",
+						flexDirection: "column",
+						overflow: "hidden",
+					}}
+				>
+					{draft && (
+						<motion.div
+							key={`editor-${draftId}`}
+							initial={{ opacity: 0 }}
+							animate={{ opacity: 1 }}
+							transition={{ duration: 0.25 }}
+							style={{
+								flex: 1,
+								display: "flex",
+								flexDirection: "column",
+								overflow: "hidden",
+							}}
+						>
+							{/* Editor top bar */}
+							<div
+								style={{
+									padding: "12px 24px",
+									borderBottom: `1px solid ${T.border}`,
+									background: T.surface,
+									display: "flex",
+									alignItems: "center",
+									gap: 8,
+									flexShrink: 0,
+								}}
+							>
+								{/* Format tools */}
+								<TBtn
+									icon={Icons.bold}
+									label="Bold"
+									onClick={() => document.execCommand("bold")}
+								/>
+								<TBtn
+									icon={Icons.italic}
+									label="Italic"
+									onClick={() => document.execCommand("italic")}
+								/>
+								<TBtn
+									icon={Icons.list}
+									label="Bullet list"
+									onClick={() => document.execCommand("insertUnorderedList")}
+								/>
+							<TBtn
+								icon={Icons.link2}
+								label="Link"
+								onClick={() => {
+									const url = window.prompt("URL:");
+									if (url) document.execCommand("createLink", false, url);
+								}}
+							/>
+
+							{/* Divider */}
+							<div style={{ width: 1, height: 18, background: T.border, margin: "0 4px" }} />
+
+							{/* ── Insert block dropdown ── */}
+							<div data-block-menu style={{ position: "relative" }}>
+								<motion.button
+									onClick={() => setBlockMenuOpen(v => !v)}
+									whileHover={{ background: "#F0ECE5" }}
+									whileTap={{ scale: 0.95 }}
+									style={{
+										display: "flex", alignItems: "center", gap: 5,
+										background: blockMenuOpen ? "#F0ECE5" : "transparent",
+										border: "none",
+										borderRadius: 7, padding: "5px 9px",
+										fontSize: 12, fontWeight: 600,
+										color: T.accent, cursor: "pointer",
+										transition: "background 0.15s",
+									}}
+								>
+									<Icon d="M12 5v14M5 12h14" size={13} stroke={T.accent} />
+									Insert
+									<Icon d="M6 9l6 6 6-6" size={11} stroke={T.muted} strokeWidth={2} />
+								</motion.button>
+
+								<AnimatePresence>
+									{blockMenuOpen && (
+										<motion.div
+											initial={{ opacity: 0, y: 6, scale: 0.96 }}
+											animate={{ opacity: 1, y: 0, scale: 1 }}
+											exit={{ opacity: 0, y: 6, scale: 0.96 }}
+											transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+											style={{
+												position: "absolute",
+												top: "calc(100% + 6px)",
+												left: 0,
+												background: "#FFFFFF",
+												border: `1px solid ${T.border}`,
+												borderRadius: 12,
+												boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+												zIndex: 60,
+												overflow: "hidden",
+												minWidth: 195,
+												padding: 6,
+											}}
+										>
+											{/* Callouts section */}
+											<p style={{ fontSize: 10, fontWeight: 700, color: "#B0AAA3", textTransform: "uppercase", letterSpacing: "0.1em", padding: "3px 8px 6px", margin: 0 }}>
+												Callout
+											</p>
+											{["info","warning","success","danger"].map(type => {
+												const c = CALLOUT_CONFIGS[type];
+												return (
+													<motion.button
+														key={type}
+														onClick={() => insertBlock(type)}
+														whileHover={{ background: "#F7F5F0" }}
+														style={{
+															width: "100%", display: "flex", alignItems: "center", gap: 8,
+															background: "none", border: "none",
+															borderRadius: 8, padding: "7px 10px",
+															cursor: "pointer", textAlign: "left",
+															transition: "background 0.12s",
+														}}
+													>
+														<span style={{ fontSize: 15, width: 22, textAlign: "center" }}>{c.emoji}</span>
+														<div>
+															<p style={{ fontSize: 12, fontWeight: 600, color: c.textColor, margin: 0, lineHeight: 1.2 }}>{c.label}</p>
+															<p style={{ fontSize: 10.5, color: "#A8A29C", margin: 0 }}>Highlighted callout box</p>
+														</div>
+														<div style={{ flex: 1 }} />
+														<div style={{ width: 10, height: 10, borderRadius: 2, background: c.border, opacity: 0.7 }} />
+													</motion.button>
+												);
+											})}
+
+											{/* Divider */}
+											<div style={{ height: 1, background: T.border, margin: "5px 0" }} />
+											<p style={{ fontSize: 10, fontWeight: 700, color: "#B0AAA3", textTransform: "uppercase", letterSpacing: "0.1em", padding: "3px 8px 6px", margin: 0 }}>
+												More blocks
+											</p>
+
+											{/* Code block */}
+											<motion.button
+												onClick={() => insertBlock("code")}
+												whileHover={{ background: "#F7F5F0" }}
+												style={{
+													width: "100%", display: "flex", alignItems: "center", gap: 8,
+													background: "none", border: "none",
+													borderRadius: 8, padding: "7px 10px",
+													cursor: "pointer", textAlign: "left",
+													transition: "background 0.12s",
+												}}
+											>
+												<span style={{ fontSize: 15, width: 22, textAlign: "center" }}>{"</>"}</span>
+												<div>
+													<p style={{ fontSize: 12, fontWeight: 600, color: T.accent, margin: 0, lineHeight: 1.2 }}>Code block</p>
+													<p style={{ fontSize: 10.5, color: "#A8A29C", margin: 0 }}>Syntax-highlighted code</p>
+												</div>
+											</motion.button>
+
+											{/* Button */}
+											<motion.button
+												onClick={() => insertBlock("button")}
+												whileHover={{ background: "#F7F5F0" }}
+												style={{
+													width: "100%", display: "flex", alignItems: "center", gap: 8,
+													background: "none", border: "none",
+													borderRadius: 8, padding: "7px 10px",
+													cursor: "pointer", textAlign: "left",
+													transition: "background 0.12s",
+												}}
+											>
+												<span style={{ fontSize: 15, width: 22, textAlign: "center" }}>🔗</span>
+												<div>
+													<p style={{ fontSize: 12, fontWeight: 600, color: T.accent, margin: 0, lineHeight: 1.2 }}>CTA Button</p>
+													<p style={{ fontSize: 10.5, color: "#A8A29C", margin: 0 }}>Styled call-to-action link</p>
+												</div>
+											</motion.button>
+										</motion.div>
+									)}
+								</AnimatePresence>
+							</div>
+
+							<div
+								style={{
+									width: 1,
+									height: 18,
+									background: T.border,
+									margin: "0 4px",
+								}}
+							/>
+								{/* Source info */}
+								{sourceUrl && (
+									<div
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: 6,
+											background: T.base,
+											border: `1px solid ${T.border}`,
+											borderRadius: 7,
+											padding: "4px 10px",
+											maxWidth: 240,
+											overflow: "hidden",
+										}}
+									>
+										<Icon d={Icons.link2} size={12} stroke={T.muted} />
+										<span
+											style={{
+												fontSize: 12,
+												color: T.muted,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+											}}
+										>
+											{sourceUrl}
+										</span>
+									</div>
+								)}
+								<div style={{ flex: 1 }} />
+								<span style={{ fontSize: 12, color: T.muted }}>
+									{wordCount} words
+								</span>
+								<div
+									style={{
+										width: 1,
+										height: 18,
+										background: T.border,
+										margin: "0 4px",
+									}}
+								/>
+								{/* Actions */}
+								<motion.button
+									whileHover={{ background: "#F0ECE5" }}
+									whileTap={{ scale: 0.96 }}
+									onClick={handleCopy}
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 6,
+										background: T.base,
+										border: `1px solid ${T.border}`,
+										borderRadius: 8,
+										padding: "6px 12px",
+										fontSize: 12,
+										fontWeight: 600,
+										color: copied ? "#3D7A35" : T.muted,
+										cursor: "pointer",
+										transition: "all 0.18s",
+									}}
+								>
+									<Icon
+										d={Icons.copy}
+										size={13}
+										stroke={copied ? "#3D7A35" : T.muted}
+									/>
+									{copied ? "Copied!" : "Copy"}
+								</motion.button>
+								<motion.button
+									whileHover={{
+										scale: 1.03,
+										y: -1,
+										boxShadow: "0 4px 12px rgba(0,0,0,0.14)",
+									}}
+									whileTap={{ scale: 0.96 }}
+									onClick={handleSave}
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 6,
+										background: saved ? "#EFF6EE" : T.accent,
+										border: "none",
+										borderRadius: 8,
+										padding: "6px 14px",
+										fontSize: 12,
+										fontWeight: 700,
+										color: saved ? "#3D7A35" : "white",
+										cursor: "pointer",
+										transition: "all 0.2s",
+									}}
+								>
+									<Icon
+										d={Icons.save}
+										size={13}
+										stroke={saved ? "#3D7A35" : "white"}
+									/>
+									{saved ? "Saved!" : "Save draft"}
+								</motion.button>
+							</div>
+
+							{/* Draft title */}
+							<div
+								style={{
+									padding: "24px 40px 0",
+									background: T.surface,
+									borderBottom: `1px solid ${T.border}`,
+									flexShrink: 0,
+								}}
+							>
+								<div
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 10,
+										marginBottom: 12,
+									}}
+								>
+									<span
+										style={{
+											fontSize: 11,
+											fontWeight: 700,
+											background: "#F0ECE5",
+											color: T.muted,
+											padding: "2px 9px",
+											borderRadius: 100,
+										}}
+									>
+										{draft.tag}
+									</span>
+									{draft.style && (
+										<span
+											style={{
+												fontSize: 11,
+												fontWeight: 600,
+												background: "#FEF3E2",
+												color: T.warm,
+												padding: "2px 9px",
+												borderRadius: 100,
+												textTransform: "capitalize",
+											}}
+										>
+											{draft.style}
+										</span>
+									)}
+									<span style={{ fontSize: 12, color: T.muted }}>
+										{draft.date}
+									</span>
+								</div>
+								<div
+									contentEditable
+									suppressContentEditableWarning
+									data-placeholder="Untitled draft"
+									style={{
+										fontFamily: "'Instrument Serif',serif",
+										fontSize: "clamp(22px, 3vw, 30px)",
+										color: T.accent,
+										lineHeight: 1.2,
+										letterSpacing: "-0.5px",
+										outline: "none",
+										marginBottom: 12,
+										minHeight: 36,
+									}}
+									dangerouslySetInnerHTML={{ __html: draft.title }}
+								/>
+								{/* Source links */}
+								{(() => {
+									const allUrls = Array.isArray(draft?.urls)
+										? draft.urls.filter(Boolean)
+										: draft?.url
+											? [draft.url]
+											: [];
+									if (allUrls.length === 0) return null;
+									return (
+										<div
+											style={{
+												display: "flex",
+												flexWrap: "wrap",
+												gap: 6,
+												marginBottom: 16,
+											}}
+										>
+											{allUrls.map((url, i) => (
+												<a
+													key={i}
+													href={url}
+													target="_blank"
+													rel="noopener noreferrer"
+													style={{
+														display: "inline-flex",
+														alignItems: "center",
+														gap: 5,
+														fontSize: 12,
+														color: T.warm,
+														background: "#FEF3E2",
+														border: `1px solid #F5C97A`,
+														borderRadius: 7,
+														padding: "3px 10px",
+														textDecoration: "none",
+														maxWidth: 320,
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap",
+														transition: "opacity 0.15s",
+													}}
+													onMouseEnter={(e) =>
+														(e.currentTarget.style.opacity = "0.75")
+													}
+													onMouseLeave={(e) =>
+														(e.currentTarget.style.opacity = "1")
+													}
+												>
+													<Icon d={Icons.link2} size={11} stroke={T.warm} />
+													{url}
+												</a>
+											))}
+										</div>
+									);
+								})()}
+							</div>
+
+							{/* Editor body */}
+							<div
+								style={{
+									flex: 1,
+									overflowY: "auto",
+									background: T.surface,
+								}}
+							>
+								<div
+									ref={editorRef}
+									contentEditable
+									suppressContentEditableWarning
+									onInput={countWords}
+									data-placeholder="Start writing…"
+									style={{
+										maxWidth: 680,
+										margin: "0 auto",
+										padding: "28px 40px 80px",
+										minHeight: "100%",
+										outline: "none",
+										fontSize: 15,
+										lineHeight: 1.8,
+										color: "#3A3530",
+									}}
+								/>
+							</div>
+
+							{/* Bottom status bar */}
+							<div
+								style={{
+									padding: "8px 24px",
+									borderTop: `1px solid ${T.border}`,
+									background: T.surface,
+									display: "flex",
+									alignItems: "center",
+									gap: 16,
+									flexShrink: 0,
+								}}
+							>
+								<div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+									<motion.div
+										animate={{ scale: [1, 1.2, 1] }}
+										transition={{ duration: 2, repeat: Infinity }}
+										style={{
+											width: 6,
+											height: 6,
+											borderRadius: "50%",
+											background: "#3D7A35",
+										}}
+									/>
+									<span style={{ fontSize: 12, color: T.muted }}>
+										Auto-saved
+									</span>
+								</div>
+								<span style={{ fontSize: 12, color: T.muted }}>·</span>
+								<span style={{ fontSize: 12, color: T.muted }}>
+									{wordCount} words · ~{Math.ceil(wordCount / 200)} min read
+								</span>
+							<div style={{ flex: 1 }} />
+
+						{/* Themes button */}
+						<motion.button
+							whileHover={{ background: "#F0ECE5" }}
+							whileTap={{ scale: 0.97 }}
+							onClick={() => setThemeDrawerOpen(true)}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: 5,
+								background: T.base,
+								border: `1px solid ${T.border}`,
+								borderRadius: 8,
+								padding: "5px 12px",
+								fontSize: 12,
+								fontWeight: 600,
+								color: T.accent,
+								cursor: "pointer",
+							}}
+						>
+							{/* Palette icon */}
+							<svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+								<circle cx="13.5" cy="6.5" r=".5" fill={T.accent}/><circle cx="17.5" cy="10.5" r=".5" fill={T.accent}/><circle cx="8.5" cy="7.5" r=".5" fill={T.accent}/><circle cx="6.5" cy="12.5" r=".5" fill={T.accent}/>
+								<path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+							</svg>
+							Themes
+						</motion.button>
+
+					{/* Infographics button */}
+					<motion.button
+						whileHover={{ background: "#F0ECE5" }}
+						whileTap={{ scale: 0.97 }}
+						onClick={() => setInfographicsOpen(true)}
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 5,
+							background: T.base,
+							border: `1px solid ${T.border}`,
+							borderRadius: 8,
+							padding: "5px 12px",
+							fontSize: 12,
+							fontWeight: 600,
+							color: T.accent,
+							cursor: "pointer",
+						}}
+					>
+						{/* Bar chart icon */}
+						<svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+							<line x1="18" y1="20" x2="18" y2="10"/>
+							<line x1="12" y1="20" x2="12" y2="4"/>
+							<line x1="6" y1="20" x2="6" y2="14"/>
+						</svg>
+						Infographics
+					</motion.button>
+
+					{/* AI Chat button */}
+					<motion.button
+						whileHover={{ background: chatOpen ? "#C17B2F" : "#F0ECE5" }}
+						whileTap={{ scale: 0.97 }}
+						onClick={() => setChatOpen(v => !v)}
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 5,
+							background: chatOpen ? T.warm : T.base,
+							border: `1px solid ${chatOpen ? T.warm : T.border}`,
+							borderRadius: 8,
+							padding: "5px 12px",
+							fontSize: 12,
+							fontWeight: 600,
+							color: chatOpen ? "#FFFFFF" : T.accent,
+							cursor: "pointer",
+							transition: "all 0.18s",
+						}}
+					>
+						{/* Chat bubble icon */}
+						<svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={chatOpen ? "#FFFFFF" : T.accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+							<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+						</svg>
+						AI Chat
+					</motion.button>
+
+							<motion.button
+								whileHover={{ scale: 1.03 }}
+								whileTap={{ scale: 0.97 }}
+								onClick={() => router.push("/app")}
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: 6,
+									background: T.base,
+									border: `1px solid ${T.border}`,
+									borderRadius: 8,
+									padding: "5px 12px",
+									fontSize: 12,
+									fontWeight: 600,
+									color: T.muted,
+									cursor: "pointer",
+								}}
+							>
+								<Icon d={Icons.refresh} size={12} stroke={T.muted} /> New
+								draft
+							</motion.button>
+						</div>
+						</motion.div>
+					)}
+				</div>
+			</div>
+
+			{/* ── THEMES MODAL ── full-screen two-panel preview */}
+		<AnimatePresence>
+			{themeDrawerOpen && (() => {
+				const activeTheme = THEMES[previewTheme];
+				const currentHTML = editorRef.current?.innerHTML || draft?.body || "";
+				const themedDoc = activeTheme
+					? buildThemedHTML(currentHTML, activeTheme, draft?.title || "")
+					: "";
+				const isCopied = copiedTheme === previewTheme;
+				return (
+					<>
+						{/* Backdrop */}
+						<motion.div
+							key="theme-backdrop"
+							initial={{ opacity: 0 }}
+							animate={{ opacity: 1 }}
+							exit={{ opacity: 0 }}
+							onClick={() => setThemeDrawerOpen(false)}
+							style={{
+								position: "fixed", inset: 0,
+								background: "rgba(0,0,0,0.5)",
+								zIndex: 300,
+								backdropFilter: "blur(4px)",
+							}}
+						/>
+
+					{/* Centering shell — flexbox positions the modal, pointer-events:none lets backdrop work */}
+					<motion.div
+						key="theme-modal"
+						initial={{ opacity: 0 }}
+						animate={{ opacity: 1 }}
+						exit={{ opacity: 0 }}
+						transition={{ duration: 0.22 }}
+						style={{
+							position: "fixed", inset: 0,
+							zIndex: 301,
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "center",
+							pointerEvents: "none",
+						}}
+					>
+					{/* Actual modal panel */}
+					<motion.div
+						initial={{ scale: 0.95, y: 24 }}
+						animate={{ scale: 1, y: 0 }}
+						exit={{ scale: 0.95, y: 24 }}
+						transition={{ duration: 0.26, ease: [0.16, 1, 0.3, 1] }}
+						style={{
+							width: "92vw", maxWidth: 1280,
+							height: "90vh",
+							background: T.surface,
+							borderRadius: 16,
+							border: `1px solid ${T.border}`,
+							display: "flex",
+							flexDirection: "column",
+							boxShadow: "0 32px 80px rgba(0,0,0,0.28)",
+							overflow: "hidden",
+							pointerEvents: "all",
+						}}
+					>
+							{/* ─ Top bar ─ */}
+							<div
+								style={{
+									height: 56,
+									borderBottom: `1px solid ${T.border}`,
+									display: "flex",
+									alignItems: "center",
+									padding: "0 20px",
+									gap: 12,
+									flexShrink: 0,
+									background: T.surface,
+								}}
+							>
+								<p style={{ fontSize: 15, fontWeight: 700, color: T.accent, fontFamily: "'Instrument Serif',serif" }}>
+									Export themes
+								</p>
+								<p style={{ fontSize: 12, color: T.muted }}>
+									— pick a theme to preview your content, then copy the HTML
+								</p>
+								<div style={{ flex: 1 }} />
+
+							{/* Download HTML */}
+							<motion.button
+								whileHover={{ background: "#F0ECE5" }}
+								whileTap={{ scale: 0.96 }}
+								onClick={() => {
+									if (!themedDoc) return;
+									const blob = new Blob([themedDoc], { type: "text/html;charset=utf-8" });
+									const a = document.createElement("a");
+									a.href = URL.createObjectURL(blob);
+									a.download = `${(draft?.title || "draft").replace(/[^a-z0-9]/gi, "-").toLowerCase()}-${activeTheme?.name?.toLowerCase() || "theme"}.html`;
+									a.click();
+									URL.revokeObjectURL(a.href);
+								}}
+								style={{
+									display: "flex", alignItems: "center", gap: 7,
+									background: T.base,
+									color: T.accent,
+									border: `1px solid ${T.border}`,
+									borderRadius: 9,
+									padding: "8px 16px",
+									fontSize: 13,
+									fontWeight: 600,
+									cursor: "pointer",
+								}}
+							>
+								<svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+									<polyline points="7 10 12 15 17 10"/>
+									<line x1="12" y1="15" x2="12" y2="3"/>
+								</svg>
+								Download .html
+							</motion.button>
+
+							{/* Copy HTML — primary CTA */}
+							<motion.button
+								whileHover={{ background: isCopied ? "#2D6A4F" : "#333" }}
+								whileTap={{ scale: 0.96 }}
+								onClick={() => handleCopyThemeHTML(previewTheme)}
+								style={{
+									display: "flex", alignItems: "center", gap: 7,
+									background: isCopied ? "#2D6A4F" : T.accent,
+									color: "white",
+									border: "none",
+									borderRadius: 9,
+									padding: "8px 18px",
+									fontSize: 13,
+									fontWeight: 600,
+									cursor: "pointer",
+									transition: "background 0.2s",
+								}}
+							>
+								{isCopied ? (
+									<>
+										<svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+											<polyline points="20 6 9 17 4 12"/>
+										</svg>
+										Copied!
+									</>
+								) : (
+									<>
+										<svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+											<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+											<rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+										</svg>
+										Copy HTML — {activeTheme?.name}
+									</>
+								)}
+							</motion.button>
+
+							{/* Close */}
+								<motion.button
+									whileHover={{ background: "#F0ECE5" }}
+									whileTap={{ scale: 0.93 }}
+									onClick={() => setThemeDrawerOpen(false)}
+									style={{
+										background: "transparent",
+										border: `1px solid ${T.border}`,
+										borderRadius: 8,
+										width: 34, height: 34,
+										display: "flex", alignItems: "center", justifyContent: "center",
+										cursor: "pointer", flexShrink: 0,
+									}}
+								>
+									<svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={T.muted} strokeWidth={2} strokeLinecap="round">
+										<path d="M18 6L6 18M6 6l12 12"/>
+									</svg>
+								</motion.button>
+							</div>
+
+							{/* ─ Body: sidebar + preview ─ */}
+							<div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+								{/* Left: theme list */}
+								<div
+									style={{
+										width: 210,
+										borderRight: `1px solid ${T.border}`,
+										overflowY: "auto",
+										flexShrink: 0,
+										background: T.base,
+										padding: "12px 10px",
+										display: "flex",
+										flexDirection: "column",
+										gap: 3,
+									}}
+								>
+									{Object.entries(THEMES).map(([key, theme]) => {
+										const isActive = previewTheme === key;
+										const hColor = parseCSSProp(theme.h1, "color") || theme.text;
+										return (
+											<motion.button
+												key={key}
+												whileTap={{ scale: 0.97 }}
+												onClick={() => setPreviewTheme(key)}
+												style={{
+													background: isActive ? T.surface : "transparent",
+													border: `1.5px solid ${isActive ? T.border : "transparent"}`,
+													borderRadius: 10,
+													padding: "10px 12px",
+													cursor: "pointer",
+													display: "flex",
+													alignItems: "center",
+													gap: 10,
+													textAlign: "left",
+													boxShadow: isActive ? "0 1px 6px rgba(0,0,0,0.07)" : "none",
+												}}
+											>
+												{/* Color swatch strip */}
+												<div
+													style={{
+														width: 28, height: 28,
+														borderRadius: 7,
+														background: theme.bg,
+														border: "1px solid rgba(0,0,0,0.1)",
+														flexShrink: 0,
+														display: "flex",
+														alignItems: "center",
+														justifyContent: "center",
+														overflow: "hidden",
+													}}
+												>
+													<div style={{ width: 10, height: 10, borderRadius: "50%", background: hColor }} />
+												</div>
+												<div style={{ minWidth: 0 }}>
+													<p style={{
+														fontSize: 12, fontWeight: isActive ? 700 : 500,
+														color: isActive ? T.accent : "#555",
+														lineHeight: 1.3,
+													}}>
+														{theme.name}
+													</p>
+													<p style={{
+														fontSize: 10, color: T.muted,
+														overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+														marginTop: 1,
+													}}>
+														{theme.label}
+													</p>
+												</div>
+												{isActive && (
+													<div style={{
+														marginLeft: "auto",
+														width: 6, height: 6,
+														borderRadius: "50%",
+														background: T.warm,
+														flexShrink: 0,
+													}} />
+												)}
+											</motion.button>
+										);
+									})}
+								</div>
+
+								{/* Right: iframe live preview */}
+								<div style={{ flex: 1, position: "relative", background: "#e5e7eb" }}>
+									{themedDoc ? (
+										<iframe
+											key={previewTheme}
+											srcDoc={themedDoc}
+											title={`Preview — ${activeTheme?.name}`}
+											sandbox="allow-same-origin"
+											style={{
+												width: "100%",
+												height: "100%",
+												border: "none",
+												display: "block",
+											}}
+										/>
+									) : (
+										<div style={{
+											height: "100%",
+											display: "flex",
+											alignItems: "center",
+											justifyContent: "center",
+											color: T.muted,
+											fontSize: 14,
+										}}>
+											No content yet — write something in the editor first.
+										</div>
+									)}
+								</div>
+							</div>
+						</motion.div>
+					{/* end centering shell */}
+					</motion.div>
+				</>
+			);
+		})()}
+		</AnimatePresence>
+
+		{/* ── DELETE CONFIRM MODAL ── */}
+			<AnimatePresence>
+				{deleteConfirm && (
+					<>
+						<motion.div
+							initial={{ opacity: 0 }}
+							animate={{ opacity: 1 }}
+							exit={{ opacity: 0 }}
+							onClick={() => setDeleteConfirm(null)}
+							style={{
+								position: "fixed",
+								inset: 0,
+								background: "rgba(0,0,0,0.35)",
+								zIndex: 200,
+								backdropFilter: "blur(3px)",
+							}}
+						/>
+						<motion.div
+							initial={{ opacity: 0, scale: 0.92, y: 12 }}
+							animate={{ opacity: 1, scale: 1, y: 0 }}
+							exit={{ opacity: 0, scale: 0.92, y: 12 }}
+							transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+							style={{
+								position: "fixed",
+								top: "50%",
+								left: "50%",
+								transform: "translate(-50%,-50%)",
+								background: T.surface,
+								border: `1px solid ${T.border}`,
+								borderRadius: 16,
+								padding: "28px 28px",
+								width: 360,
+								zIndex: 201,
+								boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
+							}}
+						>
+							<p
+								style={{
+									fontSize: 18,
+									fontWeight: 700,
+									color: T.accent,
+									marginBottom: 8,
+									fontFamily: "'Instrument Serif',serif",
+								}}
+							>
+								Delete this draft?
+							</p>
+							<p
+								style={{
+									fontSize: 14,
+									color: T.muted,
+									lineHeight: 1.6,
+									marginBottom: 22,
+								}}
+							>
+								This action can&apos;t be undone. The draft will be permanently
+								deleted from your account.
+							</p>
+							<div style={{ display: "flex", gap: 10 }}>
+								<motion.button
+									whileHover={{ background: "#F0ECE5" }}
+									whileTap={{ scale: 0.97 }}
+									onClick={() => setDeleteConfirm(null)}
+									style={{
+										flex: 1,
+										background: T.base,
+										border: `1.5px solid ${T.border}`,
+										borderRadius: 9,
+										padding: "10px",
+										fontSize: 14,
+										fontWeight: 600,
+										color: T.accent,
+										cursor: "pointer",
+									}}
+								>
+									Cancel
+								</motion.button>
+								<motion.button
+									whileHover={{ background: "#DC2626" }}
+									whileTap={{ scale: 0.97 }}
+									onClick={confirmDelete}
+									style={{
+										flex: 1,
+										background: "#EF4444",
+										border: "none",
+										borderRadius: 9,
+										padding: "10px",
+										fontSize: 14,
+										fontWeight: 700,
+										color: "white",
+										cursor: "pointer",
+									}}
+								>
+									Delete draft
+								</motion.button>
+							</div>
+						</motion.div>
+					</>
+				)}
+		</AnimatePresence>
+
+	{/* ── INFOGRAPHICS MODAL ── */}
+	<InfographicsModal
+		open={infographicsOpen}
+		onClose={() => setInfographicsOpen(false)}
+		content={editorRef.current?.innerHTML || draft?.body || ""}
+		title={draft?.title || "Draft"}
+		userId={reduxUser?.uid || ""}
+		draftId={draftId}
+		savedInfographics={draft?.infographics || []}
+	/>
+
+	{/* ── AI CHAT SIDEBAR ── */}
+	<AIChatSidebar
+		open={chatOpen}
+		onClose={() => setChatOpen(false)}
+		editorRef={editorRef}
+		draftContent={editorRef.current?.innerHTML || draft?.body || ""}
+		draftTitle={draft?.title || "Draft"}
+		userId={reduxUser?.uid || ""}
+	/>
+</div>
+);
+}
