@@ -1,55 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// ── IndexedDB helpers ──────────────────────────────────────────────────────────
-const DB_NAME = "projectmgr";
-const DB_VERSION = 1;
+// ── API helpers (backed by data/db.json via Next.js API routes) ───────────────
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
-function openDB() {
-	return new Promise((res, rej) => {
-		const req = indexedDB.open(DB_NAME, DB_VERSION);
-		req.onupgradeneeded = (e) => {
-			const db = e.target.result;
-			if (!db.objectStoreNames.contains("projects"))
-				db.createObjectStore("projects", { keyPath: "id" });
-			if (!db.objectStoreNames.contains("tasks")) {
-				const ts = db.createObjectStore("tasks", { keyPath: "id" });
-				ts.createIndex("projectId", "projectId");
-			}
-		};
-		req.onsuccess = (e) => res(e.target.result);
-		req.onerror = (e) => rej(e.target.error);
+async function apiGetAll(store) {
+	const res = await fetch(`/api/${store}`);
+	return res.json();
+}
+
+async function apiPut(store, item) {
+	await fetch(`/api/${store}`, {
+		method: "POST",
+		headers: JSON_HEADERS,
+		body: JSON.stringify(item),
 	});
 }
 
-async function dbGetAll(store) {
-	const db = await openDB();
-	return new Promise((res, rej) => {
-		const tx = db.transaction(store, "readonly");
-		const req = tx.objectStore(store).getAll();
-		req.onsuccess = () => res(req.result);
-		req.onerror = () => rej(req.error);
-	});
-}
-
-async function dbPut(store, item) {
-	const db = await openDB();
-	return new Promise((res, rej) => {
-		const tx = db.transaction(store, "readwrite");
-		tx.objectStore(store).put(item);
-		tx.oncomplete = () => res();
-		tx.onerror = () => rej(tx.error);
-	});
-}
-
-async function dbDelete(store, id) {
-	const db = await openDB();
-	return new Promise((res, rej) => {
-		const tx = db.transaction(store, "readwrite");
-		tx.objectStore(store).delete(id);
-		tx.oncomplete = () => res();
-		tx.onerror = () => rej(tx.error);
-	});
+async function apiDelete(store, id) {
+	await fetch(`/api/${store}?id=${id}`, { method: "DELETE" });
 }
 
 // ── Design tokens (matches app theme) ────────────────────────────────────────
@@ -653,14 +622,18 @@ export default function App() {
 	const [pForm, setPForm] = useState({ name: "", url: "", description: "" });
 	const [tForm, setTForm] = useState({ title: "", description: "", priority: "Medium", status: "backlog" });
 
-	// Load from IndexedDB
+	const loadData = async () => {
+		const [ps, ts] = await Promise.all([apiGetAll("projects"), apiGetAll("tasks")]);
+		setProjects(ps);
+		setTasks(ts);
+		if (ps.length && !selectedProjectId) setSelectedProjectId(ps[0].id);
+	};
+
+	// Load from API on mount and poll every 8 s for MCP-sourced changes
 	useEffect(() => {
-		(async () => {
-			const [ps, ts] = await Promise.all([dbGetAll("projects"), dbGetAll("tasks")]);
-			setProjects(ps);
-			setTasks(ts);
-			if (ps.length) setSelectedProjectId(ps[0].id);
-		})();
+		loadData();
+		const interval = setInterval(loadData, 8000);
+		return () => clearInterval(interval);
 	}, []);
 
 	// Inject global CSS
@@ -686,7 +659,7 @@ export default function App() {
 		const project = editingProject
 			? { ...editingProject, ...pForm }
 			: { id: uid(), ...pForm, createdAt: Date.now() };
-		await dbPut("projects", project);
+		await apiPut("projects", project);
 		setProjects((prev) =>
 			editingProject
 				? prev.map((p) => (p.id === project.id ? project : p))
@@ -698,9 +671,7 @@ export default function App() {
 
 	const deleteProject = async (id) => {
 		if (!confirm("Delete this project and all its tasks?")) return;
-		await dbDelete("projects", id);
-		const toDelete = tasks.filter((t) => t.projectId === id);
-		await Promise.all(toDelete.map((t) => dbDelete("tasks", t.id)));
+		await apiDelete("projects", id);
 		setProjects((prev) => prev.filter((p) => p.id !== id));
 		setTasks((prev) => prev.filter((t) => t.projectId !== id));
 		if (selectedProjectId === id)
@@ -724,7 +695,7 @@ export default function App() {
 			taskModal.mode === "edit"
 				? { ...taskModal.task, ...tForm }
 				: { id: uid(), projectId: selectedProjectId, ...tForm, createdAt: Date.now() };
-		await dbPut("tasks", task);
+		await apiPut("tasks", task);
 		setTasks((prev) =>
 			taskModal.mode === "edit"
 				? prev.map((t) => (t.id === task.id ? task : t))
@@ -734,13 +705,13 @@ export default function App() {
 	};
 
 	const deleteTask = async (id) => {
-		await dbDelete("tasks", id);
+		await apiDelete("tasks", id);
 		setTasks((prev) => prev.filter((t) => t.id !== id));
 	};
 
 	const moveTask = async (task, newStatus) => {
 		const updated = { ...task, status: newStatus };
-		await dbPut("tasks", updated);
+		await apiPut("tasks", updated);
 		setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
 	};
 

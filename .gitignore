@@ -14,3 +14,5 @@
 .env.test.local
 .env.production.local
 node_modules
+mcp-server/node_modules
+data/db.json
